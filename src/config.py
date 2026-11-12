@@ -49,6 +49,19 @@ USE_SYNTHETIC: bool = True
 SYNTHETIC_CASES_PER_PROTOCOL: int = int(os.getenv("SYNTHETIC_CASES_PER_PROTOCOL", "120"))
 SYNTHETIC_RAW_PATH: Path = RAW_DATA_DIR / "synthetic_hospital_raw.jsonl"
 
+# --- Fonte 4: Base sintética para RAG (scripts/hospital_rag.py) ---
+RAG_DATA_DIR: Path = DATA_DIR / "rag_data"
+RAG_DATA_DIR.mkdir(parents=True, exist_ok=True)
+
+RAG_DEFAULT_N_PATIENTS: int = 200
+RAG_DEFAULT_SEED: int = 20261111
+RAG_JSONL_PATH: Path = RAG_DATA_DIR / "medical_documents.jsonl"
+RAG_PATIENTS_PATH: Path = RAG_DATA_DIR / "patients.jsonl"
+RAG_REPORT_PATH: Path = RAG_DATA_DIR / "validation_report.json"
+RAG_CHROMA_DIR: Path = BASE_DIR / "chroma_db"
+RAG_COLLECTION_NAME: str = "hospital_sintetico"
+RAG_EMBEDDING_MODEL: str = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
+
 # Caminhos dos arquivos de saída de fine-tuning
 TRAIN_JSONL_PATH: Path = PROCESSED_DATA_DIR / "finetuning_train.jsonl"
 VAL_JSONL_PATH: Path = PROCESSED_DATA_DIR / "finetuning_val.jsonl"

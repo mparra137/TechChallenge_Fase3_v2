@@ -1,0 +1,15 @@
+{
+  "valid": true,
+  "patients": 200,
+  "documents": 1787,
+  "documents_per_patient_min": 6,
+  "documents_per_patient_max": 12,
+  "document_types": {
+    "anamnese": 484,
+    "exame_laboratorial": 484,
+    "laudo_imagem": 319,
+    "evolucao_plano": 300,
+    "cadastro": 200
+  },
+  "errors": []
+}

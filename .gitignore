@@ -68,6 +68,18 @@ data/processed/*.json
 data/*.csv
 
 # ==========================================
+# Dados Sintéticos RAG (Versionados no Git)
+# ==========================================
+!data/rag_data/
+!data/rag_data/**
+
+# ==========================================
+# Banco Vetorial Local (Chroma)
+# ==========================================
+chroma_db/
+data/chroma_db/
+
+# ==========================================
 # IDEs e Sistema Operacional
 # ==========================================
 .vscode/

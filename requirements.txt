@@ -3,3 +3,11 @@ pytest
 datasets
 python-dotenv
 huggingface_hub
+# hospital_rag.py
+langchain-core>=0.3
+langchain-text-splitters>=0.3
+langchain-chroma>=0.2
+langchain-huggingface>=0.1
+sentence-transformers>=3.0
+chromadb>=0.5
+
