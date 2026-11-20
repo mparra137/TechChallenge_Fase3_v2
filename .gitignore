@@ -78,6 +78,7 @@ data/*.csv
 # ==========================================
 chroma_db/
 data/chroma_db/
+database/chroma/
 
 # ==========================================
 # IDEs e Sistema Operacional

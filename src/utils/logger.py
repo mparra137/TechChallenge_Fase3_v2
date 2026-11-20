@@ -5,7 +5,7 @@ from pathlib import Path
 import sys
 from typing import Optional
 
-from src.config import LOG_FILE_PATH, LOGS_DIR
+from src.config import LOG_FILE_PATH, LOG_LEVEL, LOGS_DIR
 
 
 def setup_logger(
@@ -27,6 +27,8 @@ def setup_logger(
         logging.Logger: Instância configurada do logger.
     """
     logger = logging.getLogger(name)
+    if name.startswith("rag."):
+        level = logging.getLevelNamesMapping()[LOG_LEVEL]
     logger.setLevel(level)
 
     if not logger.handlers:

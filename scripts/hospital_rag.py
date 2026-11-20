@@ -18,8 +18,8 @@ import random
 import re
 import sys
 import uuid
-from collections import Counter, defaultdict
-from datetime import date, datetime, timedelta
+from collections import Counter
+from datetime import date, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -29,6 +29,13 @@ if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
 from src import config
+from src.embeddings.embedding_service import get_embedding_service
+from src.ingestion.document_loader import HospitalDocumentLoader
+from src.rag.context_builder import ContextBuilder
+from src.rag.rag_service import RAGService
+from src.retrieval.patient_resolver import PatientResolver, normalize_patient_name as normalize_name
+from src.retrieval.retriever_service import RetrieverService
+from src.vectorstore.chroma_service import ChromaService
 
 SEED = config.RAG_DEFAULT_SEED
 N_PATIENTS = config.RAG_DEFAULT_N_PATIENTS
@@ -114,14 +121,6 @@ def jsonl_write(path: Path, rows: list[dict[str, Any]]) -> None:
     with path.open("w", encoding="utf-8") as f:
         for row in rows:
             f.write(json.dumps(row, ensure_ascii=False, separators=(",", ":")) + "\n")
-
-def normalize_name(name: str) -> str:
-    """Normaliza acentos, caixa e espaços para comparação de nomes."""
-    import unicodedata
-    normalized = unicodedata.normalize("NFKD", name)
-    normalized = "".join(c for c in normalized if not unicodedata.combining(c))
-    return " ".join(normalized.casefold().split())
-
 
 def make_unique_name(rng: random.Random, used_names: set[str]) -> str:
     """Gera nome completo único dentro da base."""
@@ -582,48 +581,238 @@ def search_rag(
         print(f"Trecho: {doc.page_content}")
     return results
 
-def main():
-    parser = argparse.ArgumentParser(description="Base hospitalar sintética para RAG")
-    sub = parser.add_subparsers(dest="command", required=True)
+def _build_rag_components(persist_dir: Path | None = None, patients_path: Path | None = None,
+                          documents_path: Path | None = None) -> tuple[HospitalDocumentLoader, ChromaService, RetrieverService]:
+    """Build independent RAG components from centralized settings."""
+    settings = config.validate_rag_settings(require_llm=False)
+    loader = HospitalDocumentLoader(patients_path or settings.patients_file, documents_path or settings.documents_file)
+    patients = loader.load_patients()
+    embedding_service = get_embedding_service(settings.embedding_model, settings.embedding_device)
+    chroma_service = ChromaService(
+        embedding_service=embedding_service,
+        persist_directory=persist_dir or settings.chroma_persist_directory,
+        collection_name=settings.chroma_collection_name,
+    )
+    retriever = RetrieverService(
+        vectorstore=chroma_service,
+        patient_resolver=PatientResolver(patients),
+        default_k=settings.retriever_k,
+        loader=loader,
+    )
+    return loader, chroma_service, retriever
 
-    gen = sub.add_parser("generate", help="Gerar pacientes e documentos JSONL")
+
+def ingest_hospital_data(persist_dir: Path | None = None, documents_path: Path | None = None) -> dict[str, Any]:
+    """Validate original JSONL files and idempotently index one vector per document."""
+    loader, chroma_service, retriever = _build_rag_components(persist_dir, documents_path=documents_path)
+    patients = retriever.patient_resolver.patients
+    documents = loader.load_documents()
+    report = loader.validate_integrity(
+        patients,
+        documents,
+        expected_patient_count=config.RAG_EXPECTED_PATIENT_COUNT,
+        expected_document_count=config.RAG_EXPECTED_DOCUMENT_COUNT,
+    )
+    if not report.valid:
+        raise ValueError(f"Integridade da base inválida: {report.errors}")
+    converted_documents, rejected = loader.to_langchain_documents(documents)
+    stats = chroma_service.add_documents(
+        converted_documents,
+        total_read=len(documents),
+        rejected=rejected,
+    )
+    return {
+        "integrity": {
+            "patients": report.patient_count,
+            "documents": report.document_count,
+            "documents_by_type": report.documents_by_type,
+            "documents_per_patient": report.documents_per_patient,
+            "warnings": report.warnings,
+        },
+        "ingestion": stats.model_dump(),
+    }
+
+
+def query_documents(
+    question: str,
+    patient_id: str | None = None,
+    patient_name: str | None = None,
+    document_type: str | None = None,
+    k: int | None = None,
+    persist_dir: Path | None = None,
+    patients_path: Path | None = None,
+) -> list[dict[str, Any]]:
+    """Run retrieval only, without requiring OpenAI credentials or generating an answer."""
+    _, _, retriever = _build_rag_components(persist_dir, patients_path)
+    result = retriever.retrieve(
+        question=question,
+        patient_id=patient_id,
+        patient_name=patient_name,
+        document_type=document_type,
+        k=k,
+    )
+    if result.patient.status in {"ambiguous", "not_found"}:
+        raise ValueError(result.patient.message)
+    return [document.model_dump() for document in result.documents]
+
+
+def ask_rag(
+    question: str,
+    patient_id: str | None = None,
+    patient_name: str | None = None,
+    document_type: str | None = None,
+    k: int | None = None,
+    persist_dir: Path | None = None,
+    patients_path: Path | None = None,
+) -> dict[str, Any]:
+    """Generate a sourced RAG answer through the configured LLM provider."""
+    settings = config.validate_rag_settings()
+    _, _, retriever = _build_rag_components(persist_dir, patients_path)
+    service = RAGService(
+        retriever=retriever,
+        context_builder=ContextBuilder(settings.max_context_chars),
+    )
+    return service.answer(
+        question=question,
+        patient_id=patient_id,
+        patient_name=patient_name,
+        document_type=document_type,
+        k=k,
+    ).model_dump()
+
+
+def _print_sources(sources: list[dict[str, Any]]) -> None:
+    """Render source metadata at the CLI boundary only."""
+    if not sources:
+        print("Fontes: nenhuma.")
+        return
+    print("Fontes:")
+    for source in sources:
+        print(
+            "- {document_id} | {document_type} | {document_date} | {source}".format(
+                document_id=source.get("document_id", "não informado"),
+                document_type=source.get("document_type", "não informado"),
+                document_date=source.get("document_date", "não informada"),
+                source=source.get("source", "não informada"),
+            )
+        )
+
+
+def _print_response(response: dict[str, Any]) -> None:
+    """Render an RAG response and its exact consulted sources."""
+    print("\nResposta:\n" + response["answer"])
+    _print_sources(response.get("sources", []))
+    if response.get("error"):
+        print(f"Detalhe: {response['error']}")
+
+
+def interactive_menu() -> None:
+    """Offer the required Portuguese CLI menu for manual RAG validation."""
+    options = (
+        "\nRAG Hospitalar\n"
+        "1. Executar ingestão da base\n"
+        "2. Consultar informações de pacientes\n"
+        "3. Consultar exames laboratoriais\n"
+        "4. Consultar anamneses\n"
+        "5. Consultar por código de prontuário\n"
+        "6. Consultar por nome\n"
+        "7. Exibir estatísticas do ChromaDB\n"
+        "8. Sair\n"
+    )
+    while True:
+        print(options)
+        choice = input("Escolha uma opção: ").strip()
+        try:
+            if choice == "1":
+                print(json.dumps(ingest_hospital_data(), ensure_ascii=False, indent=2))
+            elif choice in {"2", "3", "4", "5", "6"}:
+                question = input("Pergunta: ").strip()
+                patient_id = input("Código do prontuário (opcional): ").strip() or None
+                patient_name = input("Nome do paciente (opcional): ").strip() or None
+                document_type = {"3": "exame_laboratorial", "4": "anamnese"}.get(choice)
+                if choice == "5" and not patient_id:
+                    patient_id = input("Código do prontuário: ").strip() or None
+                if choice == "6" and not patient_name:
+                    patient_name = input("Nome do paciente: ").strip() or None
+                _print_response(ask_rag(question, patient_id, patient_name, document_type))
+            elif choice == "7":
+                _, chroma_service, _ = _build_rag_components()
+                print(json.dumps(chroma_service.get_collection_stats(), ensure_ascii=False, indent=2))
+            elif choice == "8":
+                print("Encerrando o RAG hospitalar.")
+                return
+            else:
+                print("Opção inválida.")
+        except (OSError, RuntimeError, ValueError) as exc:
+            print(f"Operação não concluída: {exc}")
+
+
+def main() -> None:
+    """Expose generation compatibility plus the modular RAG CLI."""
+    parser = argparse.ArgumentParser(description="RAG hospitalar com dados sintéticos")
+    sub = parser.add_subparsers(dest="command")
+
+    gen = sub.add_parser("generate", help="Gerar pacientes e documentos JSONL sintéticos")
     gen.add_argument("--patients", type=int, default=N_PATIENTS)
     gen.add_argument("--seed", type=int, default=SEED)
     gen.add_argument("--output-dir", type=Path, default=OUTPUT_DIR)
 
-    ing = sub.add_parser("ingest", help="Indexar documentos no Chroma")
-    ing.add_argument("--jsonl", type=Path, default=JSONL_PATH)
-    ing.add_argument("--persist-dir", type=Path, default=CHROMA_DIR)
+    ing = sub.add_parser("ingest", help="Validar e indexar documentos no Chroma")
+    ing.add_argument("--persist-dir", type=Path)
+    ing.add_argument("--jsonl", type=Path)
 
-    qry = sub.add_parser("query", help="Pesquisar documentos no índice")
+    qry = sub.add_parser("query", help="Consultar o RAG ou somente documentos recuperados")
     qry.add_argument("question")
     qry.add_argument("--patient-id")
-    qry.add_argument("--patient-name", help="Nome completo ou trecho único do nome")
-    qry.add_argument("--patients-jsonl", type=Path, default=PATIENTS_PATH)
+    qry.add_argument("--patient-name", help="Nome completo ou trecho inequívoco")
     qry.add_argument("--document-type")
-    qry.add_argument("-k", type=int, default=5)
-    qry.add_argument("--persist-dir", type=Path, default=CHROMA_DIR)
+    qry.add_argument("-k", type=int)
+    qry.add_argument("--persist-dir", type=Path)
+    qry.add_argument("--patients-jsonl", type=Path)
+    qry.add_argument("--retrieve-only", action="store_true", help="Não chamar o LLM configurado")
+
+    stats = sub.add_parser("stats", help="Exibir estatísticas da coleção Chroma")
+    stats.add_argument("--persist-dir", type=Path)
+    sub.add_parser("menu", help="Abrir menu interativo em português")
 
     args = parser.parse_args()
-    if args.command == "generate":
-        patients, docs, report = generate_dataset(args.patients, args.seed, args.output_dir)
+    if args.command is None or args.command == "menu":
+        interactive_menu()
+    elif args.command == "generate":
+        patients, _, report = generate_dataset(args.patients, args.seed, args.output_dir)
         print(json.dumps(report, ensure_ascii=False, indent=2))
         if not report["valid"]:
             raise SystemExit("Validação falhou; consulte validation_report.json")
-        print(f"\nArquivos gerados em: {args.output_dir.resolve()}")
+        print(f"\nArquivos gerados em: {args.output_dir.resolve()} ({len(patients)} pacientes)")
     elif args.command == "ingest":
-        vectorstore, count = ingest_langchain(args.jsonl, args.persist_dir)
-        print(f"Ingestão concluída: {count} chunks indexados.")
+        print(json.dumps(ingest_hospital_data(args.persist_dir, args.jsonl), ensure_ascii=False, indent=2))
+    elif args.command == "stats":
+        _, chroma_service, _ = _build_rag_components(args.persist_dir)
+        print(json.dumps(chroma_service.get_collection_stats(), ensure_ascii=False, indent=2))
     elif args.command == "query":
-        search_rag(
-            question=args.question,
-            patient_id=args.patient_id,
-            patient_name=args.patient_name,
-            document_type=args.document_type,
-            k=args.k,
-            patients_path=args.patients_jsonl,
-            persist_dir=args.persist_dir,
-        )
+        if args.retrieve_only:
+            documents = query_documents(
+                args.question,
+                args.patient_id,
+                args.patient_name,
+                args.document_type,
+                args.k,
+                args.persist_dir,
+                args.patients_jsonl,
+            )
+            print(json.dumps(documents, ensure_ascii=False, indent=2))
+        else:
+            _print_response(
+                ask_rag(
+                    args.question,
+                    args.patient_id,
+                    args.patient_name,
+                    args.document_type,
+                    args.k,
+                    args.persist_dir,
+                    args.patients_jsonl,
+                )
+            )
 
 if __name__ == "__main__":
     main()

@@ -1,5 +1,7 @@
 # Tech Challenge - Fase 3: Pipeline de Fine-Tuning Biomédico (MedQuAD via Hugging Face)
 
+Para executar a consulta hospitalar do TCv2, consulte o [guia do RAG](README_RAG.md). As seções abaixo documentam o pipeline inicial de preparação do MedQuAD.
+
 Este projeto foi desenvolvido como parte do **Tech Challenge (Fase 3)** da pós-graduação em **IA para Devs (FIAP)**.
 
 O objetivo principal é conectar diretamente ao dataset médico **MedQuAD** hospedado no **Hugging Face** ([`lavita/MedQuAD`](https://huggingface.co/datasets/lavita/MedQuAD)) utilizando a biblioteca oficial `datasets`, filtrar os pares de perguntas e respostas médicas, higienizar os textos e estruturá-los no formato **JSONL** (*Chat Completion / Messages*), preparando-os para o **fine-tuning** de modelos de linguagem base (LLMs) como GPT-4o-mini, Llama ou Mistral.

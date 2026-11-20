@@ -1,5 +1,7 @@
 # Base hospitalar sintética para RAG
 
+O guia [README_RAG.md](README_RAG.md) descreve o menu, a consulta com OpenAI e a indexação atual de um vetor por documento em `database/chroma/`. Acrescente `--retrieve-only` a uma consulta para exibir apenas os registros recuperados.
+
 ## Conteúdo
 - `scripts/hospital_rag.py`: gerador, validação, exportação JSONL e pipeline LangChain + Chroma.
 - `requirements.txt`: dependências da ingestão vetorial.
