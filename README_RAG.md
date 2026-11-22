@@ -84,6 +84,48 @@ Quando os registros são insuficientes, a CLI sinaliza ausência de evidência. 
 
 O utilitário técnico também admite buscas sem paciente e algumas operações sobre toda a base, como contagem de pacientes ou maior valor documentado de um exame. O agente conversacional delimita as consultas de prontuário ao paciente identificado. Esse filtro é demonstrativo. Um sistema com dados reais exigiria autorização por usuário e isolamento de acesso.
 
+## Segurança (Proteção contra vazamentos)
+
+A proteção contra contaminação ou vazamento de dados de outro paciente quando há um paciente ativo na memória da conversa foi desenhada com uma estratégia de defesa em profundidade (defense in depth). O isolamento não depende de uma única instrução ao modelo, mas de 6 camadas integradas de controle.
+
+1. Isolamento de Memória por Sessão e Estado Mínimo (StateGraph)
+
+    - O estado conversacional persistido (ConversationState) armazena apenas campos estritamente necessários: - patient_id, history, pending_request, previous_analyte, last_intent e language.
+    - As evidências clínicas e documentos recuperados nunca são salvos no checkpoint do LangGraph. Cada turno utiliza um objeto volátil transitório Turn (scratchpad) que é descartado ao término da resposta.
+    - A persistência é indexada pela chave única thread_id. Conversas diferentes não compartilham estado nem referências de pacientes.
+
+2. Resolução Determinística e Precedência no Nó
+
+    - Em cada pergunta, o nó _route executa self.resolver.from_question(turn.original) para verificar se o usuário mencionou explicitamente um código de prontuário (PCT-XXXXXX) ou nome de paciente.
+    - Reaproveitamento da memória: Se a pergunta não mencionar nenhum paciente (turn.patient.status == "not_requested"), o fluxo resgata o paciente fixado no estado.
+    - Proteção contra nomes inválidos ou ambíguos: Se o usuário tentar mencionar um paciente inexistente, inválido ou com homônimos que causem ambiguidade, o sistema não mantém silenciosamente o paciente anterior. O estado é imediatamente neutralizado ("patient_id": None)
+
+3. Recuperação Estritamente Escopada (RetrieverService)
+
+    - O agente não chama uma busca vetorial genérica ou aberta. Ele invoca obrigatoriamente retriever.retrieve_for_patient(query, turn.patient).
+    - sse método exige que o paciente esteja com status "found" e que possua um patient_id válido, acionando a busca com a flag scoped=True.
+    - No ChromaDB (Busca Semântica): O serviço injeta um filtro estrito nos metadados do banco vetorial. Isso força o ChromaDB a filtrar o espaço de busca exclusivamente aos vetores associados àquele prontuário antes mesmo de ranquear a similaridade. Não existe fallback para busca global.
+    - Nas Consultas Estruturadas: Consultas de exames, anamneses e laudos filtram as linhas diretamente por row["patient_id"] == patient_id. Se a pergunta contiver termos que solicitem dados agregados de toda a base (ex: "quais pacientes..." ou "todos os pacientes"), o modo scoped=True bloqueia imediatamente e retorna vazio.
+
+4. Checagem Dupla Pós-Recuperação
+
+    - Como salvaguarda caso qualquer falha no índice vetorial ou filtro traga documentos indevidos, existem asserções explícitas tanto no retriever quanto no grafo do agente
+    - Se um único documento pertencer a outro patient_id, uma exceção é disparada, impedindo imediatamente que o fluxo continue e cancelando a entrega dos dados.
+
+5. Ocultação de Metadados e Aliases Efêmeros
+
+    - Antes de enviar o contexto para o modelo gerador/sintetizador de respostas:
+        - Os metadados de identificação do paciente (patient_id, patient_name, source) são apagados/anulados ("patient_id": None, "patient_name": None).
+        - Os IDs dos documentos reais são substituídos por identificadores efêmeros locais (D1, D2, etc.).
+        - O conteúdo clínico passa pelo Redactor, que mascara nomes e prontuários que não sejam o prontuário autorizado.
+    - Dessa forma, o LLM sintetizador não tem visibilidade nem incentivo para cruzar identificadores externos.
+
+6. Contrato de Citação Rígido e Verificável
+
+    - Prompt SYNTHESIS_PROMPT impõe que a resposta seja um JSON estruturado onde cada afirmação (finding) deve obrigatoriamente citar as fontes nos aliases fornecidos (sources: ["D1", ...]).
+    - A regra 6 do prompt dita expressamente: "Não misture informações de pacientes diferentes."
+    - Na validação da resposta, se o LLM tentar referenciar qualquer documento ou alias que não faça parte dos documentos recuperados e validados para aquele turno específico, o sistema lança um erro e descarta a resposta, retornando status unavailable.
+
 ## Testes e validação registrada
 
 Execute `python -m pytest -q` para verificar recuperação, isolamento, respostas estruturadas, citações e idempotência com dependências simuladas. Para incluir o teste opcional de dimensão e norma do MiniLM real, disponibilize o modelo e defina `$env:TEST_REAL_MINILM = '1'` antes da suíte.

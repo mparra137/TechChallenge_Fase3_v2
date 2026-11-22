@@ -1,3 +1,5 @@
+# Tech Challenge - Fase 3 - Turma 10IADT - FIAP
+
 # Relatório técnico do assistente de informação biomédica
 
 **FIAP · IA para Devs · Tech Challenge, Fase 3**
@@ -6,7 +8,11 @@
 
 ## 1. Introdução e objetivo
 
-O projeto investiga dois problemas que, para o usuário, aparecem na mesma conversa. Ao perguntar “O que é hemoglobina glicada?”, ele espera uma explicação biomédica geral. Ao perguntar “Qual foi o último exame desta paciente?”, espera um fato de um prontuário específico, com data e origem. O primeiro problema motivou o ajuste de um Llama para responder no formato esperado. O segundo requer recuperar registros que podem mudar independentemente dos pesos do modelo.
+Este projeto visa criar um agente de inteligência artificial de suporte médico para profissionais médicos.
+
+O agente deve tirar dúvidas gerais e também responder perguntas baseadas em uma base de pacientes viva, ou seja, uma base com atualizações frequentes. Podem ser obtidos dados do paciente como histórico de anamneses, laudos e resultados de exames, com a segurança de que informações médicas não serão embaralhadas com outros pacientes. 
+
+Ao perguntar para o agente perguntas de cunho médico, como “O que é hemoglobina glicada?”, ele espera uma explicação biomédica geral. Ao perguntar “Qual foi o último exame desta paciente?”, espera um fato de um prontuário específico, com data e origem.
 
 O objetivo é oferecer informação acadêmica, explicitar a origem das respostas e reconhecer quando a evidência é insuficiente. O acervo hospitalar é fictício. Os resultados a seguir avaliam comportamento do software, geração de texto e fidelidade a esse acervo. Uma alegação de utilidade para assistência clínica real exigiria validação profissional e avaliação em outro contexto. [Guia de execução](../README.md)
 
