@@ -1,123 +1,91 @@
-# RAG Hospitalar Sintético
+# RAG hospitalar sintético
 
-Este módulo implementa recuperação aumentada por geração sobre a base hospitalar artificial do projeto TCv2. Ele serve exclusivamente a testes acadêmicos e de engenharia; não é destinado a atendimento, diagnóstico, prescrição ou uso com dados reais.
+O serviço RAG recupera cadastros e documentos clínicos artificiais por paciente, tipo e conteúdo. Há duas formas de usá-lo. O agente conversacional mantém o paciente ativo entre turnos. O utilitário `scripts/hospital_rag.py` permite inspecionar o índice e fazer uma consulta independente, inclusive sem gerar texto. [Guia do agente](README.md) · [Base sintética e relatórios](README_RAG_DATA.md)
 
-## Arquitetura
+## Do prontuário à resposta
 
-```text
-JSONL sintético → HospitalDocumentLoader → ChromaDB
-                                      ↓
-Pergunta → PatientResolver → RetrieverService → ContextBuilder → LLM → resposta + fontes
+Os arquivos JSONL já acompanham o clone. Na primeira ingestão, os 1.787 documentos da base geram **1.787 vetores** na coleção `hospital_patients`. Durante a consulta, os JSONL também permitem responder a pedidos como “Quais foram os últimos três exames?” ordenando os registros do paciente por data.
+
+```mermaid
+flowchart TD
+    subgraph ingestao["Preparação do índice"]
+        gerar["Geração sintética opcional"] -.-> dados["patients.jsonl e medical_documents.jsonl"]
+        dados --> validar["Validar IDs, vínculos e metadados"]
+        validar --> converter["Converter cada registro clínico em um Document LangChain"]
+        converter --> embeddings["MiniLM na CPU: um vetor por documento"]
+        embeddings --> chroma[("Chroma · hospital_patients")]
+    end
+
+    subgraph consulta["Recuperação a cada pergunta"]
+        agente["Agente · PATIENT_RECORD"] --> resolver["Resolver paciente e filtros aplicáveis"]
+        cli["hospital_rag.py query"] --> resolver
+        resolver --> tipo{"Consulta estruturada reconhecida?"}
+        tipo -->|Sim| estruturada["Selecionar registros por campos, datas ou valores"]
+        tipo -->|Não| busca["Buscar por similaridade com os filtros aplicáveis"]
+        estruturada --> resultado["Resultado da recuperação"]
+        busca --> resultado
+    end
+
+    dados -.-> estruturada
+    chroma -.-> busca
+
+    subgraph consumo["Entrega ao usuário"]
+        resultado -->|"query com --retrieve-only"| documentos["Exibir documentos e metadados"]
+        resultado -->|Resposta exata| local["Exibir resultado local com fontes"]
+        resultado -->|Síntese com evidência| sintese["Montar contexto e solicitar síntese à OpenAI"]
+        sintese --> fontes["Validar citações e exibir resposta com ID, data e origem"]
+        resultado -->|Evidência insuficiente| insuficiente["Informar a limitação documental"]
+    end
 ```
 
-- `src/ingestion/document_loader.py`: leitura, validação relacional e conversão de cada documento JSONL em um `Document` LangChain.
-- `src/embeddings/embedding_service.py`: instancia uma vez por processo o modelo `sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2`, em CPU e com vetores normalizados.
-- `src/vectorstore/chroma_service.py`: persistência idempotente no Chroma, busca e estatísticas.
-- `src/retrieval/patient_resolver.py`: busca determinística por código, nome completo ou trecho de nome inequívoco.
-- `src/retrieval/retriever_service.py`: filtros por paciente/tipo e recuperação semântica.
-- `src/rag/context_builder.py`: limita e identifica o contexto encaminhado ao LLM.
-- `src/llm/llm_factory.py`: factory desacoplada do provedor; OpenAI é o provedor atual.
-- `src/rag/rag_service.py`: coordena recuperação, contexto, geração e fontes estruturadas.
-
-Os mesmos componentes de recuperação também atendem ao agente conversacional. O comando `query` e a síntese documental da CLI usam a geração OpenAI configurada. Na CLI do agente, o Llama local atende às perguntas médicas gerais e auxilia no roteamento.
+Perguntas médicas gerais seguem pela rota `GENERAL_MEDICAL` diretamente para o Llama local.
 
 ## Agente local
 
-Use Python 3.12 com PyTorch CUDA. No Windows, o perfil de referência é Torch 2.10.0 com CUDA 12.8. Em um ambiente novo, instale primeiro a distribuição CUDA e depois as dependências do projeto.
+Para instalar o ambiente, configurar as credenciais e iniciar a conversa, siga o [README principal](README.md#instalação). No grafo, a rota `PATIENT_RECORD` resolve a identidade antes de recuperar registros. A rota `GENERAL_MEDICAL` usa o Llama local. O comando `query` do utilitário acessa o serviço RAG diretamente, sem passar pelo roteamento e pela memória do agente.
+
+## Ingestão e índice
+
+Na raiz do clone, com a `.venv` ativa, execute:
 
 ```powershell
-& .\.venv\Scripts\python.exe -m pip install torch==2.10.0 --index-url https://download.pytorch.org/whl/cu128
-& .\.venv\Scripts\python.exe -m pip install -r requirements.txt
-& .\.venv\Scripts\python.exe -m scripts.medical_agent
+python scripts/hospital_rag.py ingest
+python scripts/hospital_rag.py stats
 ```
 
-O agente espera o adaptador configurado, o respectivo modelo-base e o MiniLM no cache do Hugging Face. A inferência geral usa CUDA e a recuperação usa CPU. Para perguntas de síntese ou interpretação documental, configure `OPENAI_API_KEY` no ambiente ou em `.env` e o modelo em `src/config.py`. A API recebe a pergunta mascarada e os documentos sintéticos selecionados, com aliases temporários. A aplicação valida os aliases e resolve as fontes no ambiente local. A rota geral permanece disponível quando a OpenAI ou o índice está indisponível. As consultas exatas continuam disponíveis quando falta apenas o acesso à OpenAI.
+A ingestão valida os JSONL versionados, converte cada documento em um `Document` LangChain e calcula um vetor normalizado com `sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2`, na CPU. A primeira execução pode baixar o modelo. Cada `document_id` identifica um vetor na coleção `hospital_patients`, persistida em `database/chroma/`. Para a base distribuída, espere **1.787 vetores**.
 
-- `/ajuda` lista os comandos.
-- `/limpar` apaga o contexto e os checkpoints da conversa atual.
-- `/nova` encerra a sessão anterior e cria uma conversa isolada.
-- `/sair`, EOF ou `Ctrl+C` encerram a CLI.
+Repetir a ingestão da mesma base ignora documentos inalterados e atualiza os alterados. Para uma nova população, use um diretório de persistência novo. Se trocar o modelo de embeddings ou a estratégia de indexação, use uma nova coleção. Os caminhos, o modelo e os limites de recuperação ficam em [src/config.py](src/config.py).
 
-Exemplo de conversa sintética: “Qual foi a última creatinina do paciente PCT-000001?” e “E a glicemia dele?”. A CLI confirma o nome selecionado, exibe fatos documentados e referencia as fontes por ID, data e origem. A memória vive em RAM. O modo `--log-level INFO` registra tempos e métricas técnicas de inferência. Consulte o [plano técnico do agente](docs/agent_impl.md) para detalhes de segurança e avaliação.
+## Consultas estruturadas e busca vetorial
 
-Pedidos diretos pela última anamnese exibem o documento mais recente. Pedidos como “Quais os exames realizados pelo paciente PCT-000086?” listam os exames laboratoriais e de imagem registrados para o paciente. “Quais os últimos 3 exames?” ordena os registros por data e aplica o limite solicitado. A resposta e as fontes podem mostrar o código do prontuário consultado. O mascaramento continua aplicado aos demais identificadores protegidos.
+O resolvedor identifica o paciente por prontuário, nome normalizado ou trecho de nome inequívoco. O recuperador tenta as operações estruturadas reconhecidas, como listar exames, selecionar os três mais recentes e localizar o resultado de uma data. Elas consultam os JSONL, o que permite ordenar datas e consultar todos os registros pertinentes. Na busca semântica, o Chroma devolve os documentos mais próximos da pergunta com os filtros aplicáveis. O valor padrão de K é 5.
 
-Após identificar um paciente, a CLI usa o mesmo prontuário nas consultas documentais seguintes que omitirem nome e código. Perguntas médicas gerais continuam no Llama local e preservam o paciente ativo. Uma nova identidade confirmada muda o prontuário. Identidades ambíguas ou não encontradas suspendem a seleção até o esclarecimento. Pedidos de resultado de ultrassom abdominal usam o laudo mais recente, ou o laudo da data informada.
-
-Nas respostas médicas gerais, a CLI exibe as referências e os links gerados pelo Llama. A verificação de proveniência dos documentos recuperados se aplica às fontes do RAG.
-
-## Configuração
-
-Use `.env.example` como referência para colocar a chave OpenAI em `.env` (`OPEN_AI_API_KEY` ou `OPENAI_API_KEY`). A chave Hugging Face é opcional para o modelo público. Configure modelo e endpoint OpenAI, provedor, embeddings, coleção, caminhos, K, orçamento de contexto e log diretamente em `src/config.py`. Para a síntese na CLI, use um modelo habilitado na conta e compatível com [Structured Outputs](https://developers.openai.com/api/docs/guides/structured-outputs).
-
-## Instalação
-
-No PowerShell, com o ambiente virtual do projeto:
+Para inspecionar os documentos e metadados recuperados sem chamar a OpenAI:
 
 ```powershell
-& .\.venv\Scripts\python.exe -m pip install "langchain-openai==1.8.0" "langchain-core==1.8.0"
+python scripts/hospital_rag.py query "Quais sintomas foram relatados?" --patient-id PCT-000001 --document-type anamnese --retrieve-only
 ```
 
-O primeiro uso dos embeddings pode baixar o modelo multilíngue. A execução de recuperação usa CPU para preservar a GPU do Llama.
-
-O comando acima complementa a instalação existente do TCv2. Com o MiniLM completo em cache, `$env:HF_HUB_OFFLINE = '1'` no PowerShell permite reutilizá-lo localmente. Essa opção do Hugging Face vale para a sessão do terminal.
-
-## Ingestão persistente
-
-Os JSONL existentes não são regenerados. Cada documento clínico original é indexado como um vetor, usando `document_id` como identificador estável.
+Para consultar o serviço com resposta e fontes:
 
 ```powershell
-& .\.venv\Scripts\python.exe scripts\hospital_rag.py ingest
-& .\.venv\Scripts\python.exe scripts\hospital_rag.py stats
+python scripts/hospital_rag.py query "Quais os últimos 3 exames?" --patient-id PCT-000086
+python scripts/hospital_rag.py query "Quais sintomas foram relatados?" --patient-name "Emanuel Cunha Cordeiro" --document-type anamnese
 ```
 
-A base atual deve apresentar 200 pacientes, 1.787 documentos e 1.787 vetores após a primeira ingestão. Rodar a ingestão novamente mantém a coleção idempotente: documentos inalterados são ignorados e documentos alterados são atualizados. O índice é persistido em `database/chroma/`, que é ignorado pelo Git.
+Uma consulta com resposta exata usa o resultado local. Quando a resposta exige geração, o serviço monta o contexto, chama a OpenAI e confere se os IDs citados pertencem aos documentos enviados. O método de serviço devolve `sources` e `retrieved_documents`. O comando exibe a resposta e as fontes. Para explorar ingestão, estatísticas e consultas em um menu, execute `python scripts/hospital_rag.py menu`. [Serviço de consulta](src/rag/rag_service.py)
 
-## Consultas
+## Síntese e citações no agente
 
-Consulta completa, com recuperação e resposta OpenAI:
+Na conversa, a consulta exata devolve o fato documentado. Para interpretar ou sintetizar registros, o agente mascara a pergunta e as evidências, atribui identificadores temporários aos documentos e pede à OpenAI uma resposta estruturada que atribua os achados às fontes. A aplicação valida as referências devolvidas e recupera localmente o ID original, a data e a origem de cada fonte usada. O código do prontuário consultado pode aparecer na apresentação. [Síntese documental](src/agent/records.py)
 
-```powershell
-& .\.venv\Scripts\python.exe scripts\hospital_rag.py query "Quais foram os exames realizados?" --patient-id PCT-000001
-& .\.venv\Scripts\python.exe scripts\hospital_rag.py query "Quais sintomas foram relatados?" --patient-name "Emanuel Cunha Cordeiro" --document-type anamnese
-```
+Quando os registros são insuficientes, a CLI sinaliza ausência de evidência. Uma falha no provedor, no formato da síntese ou na validação das citações produz uma mensagem de síntese indisponível. O modelo OpenAI configurado precisa aceitar a saída estruturada usada pelo agente. As credenciais e os passos de diagnóstico estão no [guia de execução](README.md#diagnóstico-e-testes).
 
-Consulta de recuperação sem LLM, útil para validação ou quando não houver chave OpenAI:
+O utilitário técnico também admite buscas sem paciente e algumas operações sobre toda a base, como contagem de pacientes ou maior valor documentado de um exame. O agente conversacional delimita as consultas de prontuário ao paciente identificado. Esse filtro é demonstrativo. Um sistema com dados reais exigiria autorização por usuário e isolamento de acesso.
 
-```powershell
-& .\.venv\Scripts\python.exe scripts\hospital_rag.py query "Qual foi a hemoglobina glicada?" --patient-id PCT-000001 --document-type exame_laboratorial --retrieve-only
-```
+## Testes e validação registrada
 
-Para abrir a interface interativa em português:
+Execute `python -m pytest -q` para verificar recuperação, isolamento, respostas estruturadas, citações e idempotência com dependências simuladas. Para incluir o teste opcional de dimensão e norma do MiniLM real, disponibilize o modelo e defina `$env:TEST_REAL_MINILM = '1'` antes da suíte.
 
-```powershell
-& .\.venv\Scripts\python.exe scripts\hospital_rag.py menu
-```
-
-O resolvedor não escolhe silenciosamente entre homônimos. Um código de prontuário tem prioridade e consultas sem paciente específico continuam permitidas. Em cenário real, o escopo autorizado do paciente deve ser derivado da identidade autenticada no servidor, não de um valor enviado livremente pelo cliente.
-
-## Fontes e limites
-
-Cada resposta retorna `sources` e `retrieved_documents` com `document_id`, paciente, tipo, data e origem. O serviço não chama o LLM quando não recupera contexto suficiente, evitando inventar dados de paciente.
-
-Busca vetorial não substitui consultas estruturadas para números, datas, agregações ou cálculos longitudinais. Dados e resultados do projeto são sintéticos e não clinicamente validados.
-
-O caminho estruturado percorre os JSONL para responder, por exemplo, “Quantos pacientes há na base?”, “Qual foi a maior glicemia de jejum na base?” e “Quais pacientes possuem registros de glicemia elevada?”. A última consulta compara cada medida com o intervalo informado no próprio documento. Para um paciente, o serviço também seleciona registros por data ISO ou brasileira e pela data mais recente. Agregações fora dessas formas precisam de uma consulta específica.
-
-Cada coleção registra seu modelo de embeddings e a estratégia de um vetor por documento. Para mudar qualquer um deles, configure um novo nome de coleção e execute a ingestão. O serviço confere os IDs persistidos. Os modos de geração com Llama local e Groq ficam reservados na factory. Os componentes de resolução, recuperação, contexto e geração podem ser usados separadamente pelo futuro grafo.
-
-## Testes
-
-Os testes unitários não exigem chave OpenAI, internet ou download de embeddings:
-
-```powershell
-& .\.venv\Scripts\python.exe -m pytest -q
-```
-
-Eles cobrem leitura e integridade JSONL, conversão de metadados, resolução de pacientes, contexto, resposta com LLM simulado e idempotência do Chroma com embeddings falsos.
-
-Para incluir a medição de dimensão e norma do MiniLM real, defina `$env:TEST_REAL_MINILM = '1'` antes de executar o pytest. O contexto respeita limites de caracteres e de tokens configurados em `src/config.py`. O limite em bytes UTF-8 fornece uma estimativa conservadora do teto de tokens de conteúdo do BPE da OpenAI.
-
-### Validação de 19/11/2026
-
-A suíte Python 3.12 passou nos 42 testes, incluindo o MiniLM real em CPU. A primeira ingestão inseriu os 1.787 documentos dos 200 pacientes. Em outro processo, a segunda ingestão conferiu os IDs e ignorou os 1.787 registros inalterados. A consulta por nome e tipo recuperou apenas `ATD-PCT-000001-01` e `ATD-PCT-000001-02`. O teste OpenAI exercitou o cliente real com transporte HTTP simulado. A chamada ao serviço externo continua pendente de autorização para transmitir o documento sintético e usar a conta.
+Em **19/11/2026**, a validação histórica do módulo registrou 42 testes aprovados, incluindo o MiniLM em CPU. A primeira ingestão inseriu 1.787 documentos e a segunda ignorou os 1.787 registros inalterados. A consulta por paciente e tipo retornou apenas as duas anamneses de `PCT-000001`. O teste do cliente OpenAI nessa execução utilizou transporte HTTP simulado.

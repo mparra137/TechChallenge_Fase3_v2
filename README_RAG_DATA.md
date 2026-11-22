@@ -1,75 +1,48 @@
 # Base hospitalar sintética para RAG
 
-O [agente local](README_RAG.md#agente-local) consulta esta base usando a coleção persistida e delimita a recuperação a um paciente por turno.
+O clone inclui os **200 pacientes e 1.787 documentos** usados na demonstração. Para consultar essa base, siga direto para a ingestão. A geração interessa a quem quer reproduzir os dados ou criar outra população. Os prontuários são artificiais e destinam-se a exercícios acadêmicos. [Instalação do agente](README.md#instalação) · [Ingestão e consulta](README_RAG.md#ingestão-e-índice)
 
-O guia [README_RAG.md](README_RAG.md) descreve o menu, a consulta com OpenAI e a indexação atual de um vetor por documento em `database/chroma/`. Acrescente `--retrieve-only` a uma consulta para exibir apenas os registros recuperados.
+## Arquivos distribuídos
 
-## Conteúdo
-- `scripts/hospital_rag.py`: gerador, validação, exportação JSONL e pipeline LangChain + Chroma.
-- `requirements.txt`: dependências da ingestão vetorial.
-- Os dados são criados na pasta `data/rag_data/` ao executar o gerador (configurado em `src/config.py`).
+| Arquivo | Conteúdo |
+|---|---|
+| [patients.jsonl](data/rag_data/patients.jsonl) | Um cadastro por paciente, identificado por `patient_id` |
+| [medical_documents.jsonl](data/rag_data/medical_documents.jsonl) | Registros com ID, paciente, tipo de documento, data, origem, texto e metadados específicos |
+| [validation_report.json](data/rag_data/validation_report.json) | Resultado da validação, contagens e distribuição documental |
 
-## Instalação
-Recomendado: Python 3.10 ou superior, em ambiente virtual.
+Cada paciente tem de 6 a 12 documentos, incluindo o cadastro. A distribuição registrada no relatório é:
 
-```bash
-python -m venv .venv
-# Windows PowerShell:
-.venv\Scripts\Activate.ps1
-# Linux/macOS:
-source .venv/bin/activate
+| Tipo | Documentos |
+|---|---:|
+| Cadastro (`cadastro`) | 200 |
+| Anamnese (`anamnese`) | 484 |
+| Exame laboratorial (`exame_laboratorial`) | 484 |
+| Laudo de imagem (`laudo_imagem`) | 319 |
+| Evolução e plano (`evolucao_plano`) | 300 |
+| **Total** | **1.787** |
 
-pip install -r requirements.txt
+O vínculo entre arquivos é o `patient_id`. Por exemplo, `ATD-PCT-000001-01` é uma anamnese de `PCT-000001`. O campo `document_date` permite ordenar atendimentos por data e `source` identifica a origem do registro. Os nomes, medidas, faixas e laudos são dados de teste.
+
+## Reproduzir a geração
+
+Use o ambiente Python 3.12 descrito no [README principal](README.md#instalação). A configuração de referência usa 200 pacientes e semente **20261111**. Para comparar uma reprodução com a base versionada, grave em uma pasta separada:
+
+```powershell
+python scripts/hospital_rag.py generate --patients 200 --seed 20261111 --output-dir data/rag_reproducao
 ```
 
-## Gerar 200 pacientes
-```bash
-python scripts/hospital_rag.py generate
-```
+Confira `valid`, `errors`, a distribuição por tipo e os limites por paciente no `validation_report.json` produzido. O gerador verifica IDs duplicados, nomes completos normalizados, vínculo e nome do paciente em cada documento, campos obrigatórios, conteúdo e datas. O comando retorna erro se a validação falhar. [Gerador e validação](scripts/hospital_rag.py)
 
-Saídas:
-- `data/rag_data/patients.jsonl`
-- `data/rag_data/medical_documents.jsonl`
-- `data/rag_data/validation_report.json`
+Para regenerar **no diretório usado pelo agente**, o comando é `python scripts/hospital_rag.py generate`. Ele regrava os arquivos em `data/rag_data/`. Se adotar outra população, configure sua pasta de pacientes e documentos e um diretório Chroma novo em [src/config.py](src/config.py). A ingestão deve usar o mesmo par de arquivos que será consultado pelo agente.
 
-A densidade média gera de 6 a 12 documentos por paciente, contando o cadastro (total aproximado de 1.200 a 2.400 documentos clínicos sintéticos).
+## Conferir a recuperação
 
-## Ingerir no Chroma
-```bash
+Com os JSONL da base de referência e a `.venv` ativa, execute a partir da raiz:
+
+```powershell
 python scripts/hospital_rag.py ingest
+python scripts/hospital_rag.py stats
+python scripts/hospital_rag.py query "Quais sintomas foram relatados?" --patient-name "Emanuel Cunha Cordeiro" --document-type anamnese --retrieve-only
 ```
 
-O modelo de embeddings multilíngue é baixado na primeira execução. A execução padrão usa CPU.
-
-## Consultar
-```bash
-python scripts/hospital_rag.py query "Qual foi a hemoglobina glicada?" --patient-id PCT-000001
-python scripts/hospital_rag.py query "Quais foram os últimos exames?" --patient-name "Alexia Vieira Menezes"
-python scripts/hospital_rag.py query "Quais exames foram realizados?" --patient-id PCT-000001 --document-type exame_laboratorial
-```
-
-## Observações importantes
-- Todo o conteúdo é artificial e serve somente para testes acadêmicos e de engenharia de RAG.
-- Nomes fictícios podem coincidir incidentalmente com nomes de pessoas reais; não há intenção de representar indivíduos.
-- Resultados, faixas de referência, hipóteses e laudos são ilustrativos, não clinicamente validados.
-- O filtro por paciente é demonstrativo. Em aplicações reais, implemente autorização no servidor e isolamento de dados por usuário/tenant; não confie em um `patient_id` enviado livremente pelo cliente.
-- Para respostas com citações, preserve `document_id`, `patient_id`, `document_date` e `source` nos metadados recuperados.
-- A busca vetorial não substitui consultas SQL para valores numéricos, intervalos de datas ou cálculos longitudinais. Considere uma camada híbrida (SQL + busca vetorial).
-
-
-## Pesquisa por nome do paciente
-Todos os documentos carregam `patient_name` nos metadados. A opção
-`--patient-name` resolve o nome no `patients.jsonl` e filtra os chunks pelo
-`patient_id` correspondente. A busca tenta primeiro correspondência exata
-(normalizada sem distinção de acentos/caixa) e depois parcial. Se houver
-mais de um candidato, o sistema não escolhe automaticamente: solicita
-desambiguação. A geração garante nomes completos únicos nesta base.
-
-Exemplo:
-```bash
-python hospital_rag.py query "Quais foram os resultados laboratoriais?" --patient-name "Alexia Vieira Menezes"
-```
-
-Depois de regenerar os JSONL, execute novamente `ingest`. Para evitar misturar
-chunks antigos com novos, utilize uma pasta Chroma vazia ou um novo diretório
-de persistência.
+Confira se os documentos recuperados pertencem a `PCT-000001` e ao tipo `anamnese`. A busca por nome tenta primeiro a correspondência exata normalizada e depois a parcial. Em caso de ambiguidade, use o código de prontuário. Para entender como esses documentos chegam à resposta do modelo, consulte o [guia de RAG](README_RAG.md).
