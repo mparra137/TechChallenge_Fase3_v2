@@ -27,6 +27,7 @@ def setup_logger(
         logging.Logger: Instância configurada do logger.
     """
     logger = logging.getLogger(name)
+    logger.propagate = False
     if name.startswith("rag."):
         level = logging.getLevelNamesMapping()[LOG_LEVEL]
     logger.setLevel(level)

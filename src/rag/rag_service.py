@@ -71,7 +71,7 @@ class RAGService:
                 k=k,
             )
         except (RuntimeError, ValueError) as exc:
-            logger.error("Falha na recuperação RAG: %s", exc)
+            logger.error("Falha na recuperação RAG (%s)", type(exc).__name__)
             return RAGResponse(success=False, question=question, answer=NO_EVIDENCE_MESSAGE, error=str(exc))
 
         resolved_patient = retrieval.patient

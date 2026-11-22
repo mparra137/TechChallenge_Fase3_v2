@@ -28,10 +28,13 @@ class ChromaService:
         embedding_service: EmbeddingService,
         persist_directory: Path,
         collection_name: str,
+        *,
+        create_if_missing: bool = True,
     ) -> None:
         self.embedding_service = embedding_service
         self.persist_directory = persist_directory
         self.collection_name = collection_name
+        self.create_if_missing = create_if_missing
         self._vectorstore: Any | None = None
 
     def create_or_load_vectorstore(self) -> Any:
@@ -42,13 +45,23 @@ class ChromaService:
             from langchain_chroma import Chroma
         except ImportError as exc:
             raise RuntimeError("langchain-chroma não está instalado.") from exc
-        self.persist_directory.mkdir(parents=True, exist_ok=True)
+        if self.create_if_missing:
+            self.persist_directory.mkdir(parents=True, exist_ok=True)
+        elif not (self.persist_directory / "chroma.sqlite3").is_file():
+            raise FileNotFoundError("Índice Chroma indisponível.")
         signature = {"embedding_model": self.embedding_service.model_name, "strategy": "whole-document-v1"}
+        client_options = {}
+        if not self.create_if_missing:
+            from chromadb.config import Settings
+
+            client_options["client_settings"] = Settings(anonymized_telemetry=False)
         store = Chroma(
             collection_name=self.collection_name,
             embedding_function=self.embedding_service.get_embeddings(),
             persist_directory=str(self.persist_directory),
             collection_metadata=signature,
+            create_collection_if_not_exists=self.create_if_missing,
+            **client_options,
         )
         if store._collection.metadata != signature:
             raise ValueError("Modelo ou estratégia incompatível. Configure outra coleção em src/config.py.")

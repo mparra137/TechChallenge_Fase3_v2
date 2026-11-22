@@ -30,7 +30,7 @@ As etapas abaixo já foram implementadas:
 - Geração de pacientes e documentos clínicos sintéticos para RAG.
 - Ingestão local no Chroma e busca vetorial com filtros por paciente e tipo de documento.
 
-O serviço RAG usa o adaptador OpenAI e devolve fontes documentais. A integração do modelo fine-tuned com o agente é uma etapa futura. Consulte `README_RAG.md` para execução e limites.
+O agente conversacional usa LangGraph, o Llama ajustado local para perguntas médicas gerais e OpenAI para síntese de documentos sintéticos recuperados no escopo do paciente. Consulte `README_RAG.md` para execução e limites.
 
 ### 1.3 Fontes e finalidade dos dados
 
@@ -77,9 +77,11 @@ TCv2/
 ├── scripts/
 │   ├── Process_dataset.py                   # Orquestrador do pipeline multi-fonte
 │   ├── hospital_rag.py                      # Geração, ingestão e recuperação RAG atuais
+│   ├── medical_agent.py                    # CLI conversacional com Llama local e síntese OpenAI
 │   ├── model_hf_test.py                     # Testes de consumo do modelo publicado
 │   └── create_repo_hf.py
 ├── src/
+│   ├── agent/                               # LangGraph, memória e proteção de dados
 │   ├── config.py
 │   ├── data_loader.py
 │   ├── anonymizer.py
@@ -185,9 +187,9 @@ O identificador do adaptador, parâmetros de geração e limites de hardware dev
 
 O relatório atual registra 200 pacientes e 1.787 documentos válidos, distribuídos entre cadastro, anamnese, exames laboratoriais, laudos de imagem e evoluções.
 
-### 5.2 O que falta para o RAG integrado
+### 5.2 Integração do RAG com o agente
 
-A busca vetorial isolada não constitui a entrega final. Devem ser implementados e testados:
+A CLI do agente integra recuperação, inferência local, memória e validação de fontes. Os critérios de manutenção e avaliação são:
 
 1. recuperação programática sem acoplamento à impressão de CLI;
 2. construção de contexto com limite de tokens, ordenação e deduplicação de trechos;
@@ -232,8 +234,8 @@ Esses caminhos são uma arquitetura alvo; sua criação deve acompanhar testes e
 - [x] Notebook de fine-tuning QLoRA e execução do fine-tuning no Kaggle.
 - [x] Carregamento local do adapter LoRA e inferência experimental em GPU.
 - [x] Base RAG sintética, validação, indexação Chroma e recuperação vetorial filtrada.
-- [ ] Integrar retriever, construtor de contexto, modelo fine-tuned e citações em um serviço RAG.
-- [ ] Criar testes unitários e de integração específicos para recuperação, isolamento de pacientes e resposta fundamentada.
+- [x] Integrar retriever, construtor de contexto, modelo fine-tuned e citações no agente LangGraph.
+- [x] Criar testes específicos para recuperação, isolamento de pacientes e resposta fundamentada.
 - [ ] Criar protocolo de avaliação comparando modelo sem RAG, modelo fine-tuned e modelo fine-tuned com RAG.
 - [ ] Refatorar scripts experimentais para logging, tipagem, configuração injetável e interfaces de serviço adequadas.
 

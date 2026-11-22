@@ -1,217 +1,123 @@
+"""Inferência conversacional e entrada experimental do Llama."""
+from __future__ import annotations
 
-import time
-import threading
+import logging
+import sys
+from pathlib import Path
+from threading import Lock
+from time import perf_counter
+from typing import Any, Sequence
+
 import torch
 
+if __name__ == "__main__":
+    sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
 from inference.model_loader import load_medical_model
+from src import config
 
-class VRAMMonitor:
+logger = logging.getLogger(__name__)
+_GENERATION_LOCK = Lock()
 
-    def __init__(self, interval=1.0):
-        self.interval = interval
-        self.stop_event = threading.Event()
-        self.thread = None
-        self.samples = []
 
-    def _monitor(self):
+class LocalInference:
+    """Share model weights and serialize deterministic CUDA generations."""
 
-        while not self.stop_event.wait(self.interval):
+    def __init__(self, model: Any, tokenizer: Any) -> None:
+        self.model = model
+        self.tokenizer = tokenizer
 
-            allocated = torch.cuda.memory_allocated(0) / 1024**3
-            reserved = torch.cuda.memory_reserved(0) / 1024**3
-            free, total = torch.cuda.mem_get_info(0)
-
-            sample = {
-                "allocated": allocated,
-                "reserved": reserved,
-                "free": free / 1024**3,
-                "total": total / 1024**3
-            }
-
-            self.samples.append(sample)
-
-            print(
-                f"[VRAM] Alocada: {allocated:.2f} GB | "
-                f"Reservada: {reserved:.2f} GB | "
-                f"Livre: {free / 1024**3:.2f} GB"
-            )
-
-    def start(self):
-        self.samples = []
-        self.stop_event.clear()
-
-        self.thread = threading.Thread(
-            target=self._monitor,
-            daemon=True
+    def _encode(self, messages: Sequence[dict[str, str]]) -> Any:
+        return self.tokenizer.apply_chat_template(
+            list(messages), 
+            tokenize=True, 
+            add_generation_prompt=True,
+            return_tensors="pt", 
+            return_dict=True,
         )
 
-        self.thread.start()
+    def count_tokens(self, messages: Sequence[dict[str, str]]) -> int:
+        """Count the full prompt including chat delimiters."""
+        return int(self._encode(messages)["input_ids"].shape[-1])
 
-    def stop(self):
-        self.stop_event.set()
+    def generate(self, messages: Sequence[dict[str, str]], output_tokens: int, context_limit: int) -> str:
+        """Generate and decode only the continuation within the context limit."""
+        with _GENERATION_LOCK:
+            return self._generate(messages, output_tokens, context_limit)
 
-        if self.thread:
-            self.thread.join()
+    def choose(self, messages: Sequence[dict[str, str]], choices: Sequence[int], context_limit: int) -> int:
+        """Generate exactly one allowed label with the Llama tokenizer."""
+        labels = [self.tokenizer.encode(str(choice), add_special_tokens=False) for choice in choices]
+        if any(len(label) != 1 for label in labels):
+            raise ValueError("O tokenizer deve representar cada opção com um único token.")
+        allowed = [label[0] for label in labels]
+        with _GENERATION_LOCK:
+            return int(self._generate(messages, 1, context_limit, allowed))
 
-
-def generate_response(model, tokenizer, question):
-
-    messages = [
-        {
-            "role": "system",
-            "content": (
-                "You are a biomedical evidence assistant specialized "
-                "in clinical and scientific information. "
-                "Provide accurate, clear, and evidence-based answers. "
-                "Do not invent information. "
-                "If you are uncertain, explicitly state your limitations. "
-                "Use appropriate medical terminology. "                      
-            )
-        },
-        {
-            "role": "user",
-            "content": question
-        }
-    ]
-
-    # Formatação no padrão de conversa do Llama 3.1
-    prompt = tokenizer.apply_chat_template(
-        messages,
-        tokenize=False,
-        add_generation_prompt=True
-    )
-
-    # Tokenização
-    input_device = model.get_input_embeddings().weight.device
-
-    inputs = tokenizer(
-        prompt,
-        return_tensors="pt"
-    ).to(input_device)
-
-    input_tokens = inputs["input_ids"].shape[1]
-
-    # Limpa estatísticas anteriores
-    torch.cuda.synchronize()
-    torch.cuda.reset_peak_memory_stats(0)
-
-    monitor = VRAMMonitor(interval=1.0)
-
-    print("\nIniciando inferência...")
-    monitor.start()
-
-    start_time = time.perf_counter()
-
-    try:
+    def _generate(
+        self, 
+        messages: Sequence[dict[str, str]], 
+        output_tokens: int, 
+        context_limit: int,
+        allowed: list[int] | None = None,
+    ) -> str:
+        inputs = self._encode(messages)
+        input_tokens = int(inputs["input_ids"].shape[-1])
+        if output_tokens < 1 or input_tokens + output_tokens > context_limit:
+            raise ValueError("A conversa excede o orçamento de tokens.")
+        device = self.model.get_input_embeddings().weight.device
+        gpu = device if device.type == "cuda" else torch.device("cuda:0")
+        eos_ids = [self.tokenizer.eos_token_id]
+        eot = self.tokenizer.get_vocab().get("<|eot_id|>")
+        if eot is not None and eot not in eos_ids:
+            eos_ids.append(eot)
+        torch.cuda.synchronize(gpu)
+        torch.cuda.reset_peak_memory_stats(gpu)
+        started = perf_counter()
+        inputs = inputs.to(device)
         with torch.inference_mode():
-
-            # outputs = model.generate(
-            #     **inputs,
-            #     max_new_tokens=256,
-            #     do_sample=False,
-            #     use_cache=True,
-            #     pad_token_id=tokenizer.eos_token_id
-            # )
-
-            # Identifica o token de encerramento de turno do Llama 3
-            eot_token_id = tokenizer.convert_tokens_to_ids(
-                "<|eot_id|>"            
-            )
-
-            eos_ids = [tokenizer.eos_token_id]
-
-            if (eot_token_id is not None and eot_token_id not in eos_ids):
-                eos_ids.append(eot_token_id)
-
-            outputs = model.generate(
-                **inputs,
-
-                # Limite de geração
-                max_new_tokens=256,
-
-                # Geração determinística
-                do_sample=False,
-
+            output = self.model.generate(
+                **inputs, 
+                max_new_tokens=output_tokens, 
+                do_sample=False, 
                 # Controle de repetição
                 repetition_penalty=1.08,
                 no_repeat_ngram_size=3,
-
-                # Cache de atenção
+                #
                 use_cache=True,
-
-                # Encerramento correto
-                eos_token_id=eos_ids,
-                pad_token_id=tokenizer.pad_token_id
+                eos_token_id=eos_ids, 
+                pad_token_id=self.tokenizer.pad_token_id,
+                prefix_allowed_tokens_fn=(lambda _batch, _ids: allowed) if allowed is not None else None,
             )
+        continuation = output[0, input_tokens:].tolist()
+        torch.cuda.synchronize(gpu)
+        free, _ = torch.cuda.mem_get_info(gpu)
+        logger.info(
+            "Geração: entrada=%s saída=%s segundos=%.3f pico_mib=%.0f reservado_mib=%.0f livres_mib=%.0f",
+            input_tokens, len(continuation), perf_counter() - started,
+            torch.cuda.max_memory_allocated(gpu) / 2**20, torch.cuda.max_memory_reserved(gpu) / 2**20, free / 2**20,
+        )
+        return self.tokenizer.decode(
+            continuation, skip_special_tokens=True, clean_up_tokenization_spaces=False,
+        ).strip()
 
-        torch.cuda.synchronize()
+    @staticmethod
+    def release_cached_memory() -> None:
+        """Release unused blocks before a reduced retry after CUDA OOM."""
+        with _GENERATION_LOCK:
+            torch.cuda.empty_cache()
 
-    finally:
-        monitor.stop()
 
-    end_time = time.perf_counter()
-
-    # Extrai somente os tokens gerados
-    generated_tokens = outputs.shape[1] - input_tokens
-
-    response = tokenizer.decode(
-        outputs[0][input_tokens:],
-        skip_special_tokens=True,
-        clean_up_tokenization_spaces=False
+def generate_response(model: Any, tokenizer: Any, question: str) -> str:
+    """Run the original one-question experiment and render its result."""
+    answer = LocalInference(model, tokenizer).generate(
+        [{"role": "system", "content": config.SYSTEM_PROMPT}, {"role": "user", "content": question}],
+        config.AGENT_ANSWER_TOKENS, config.AGENT_CONTEXT_TOKENS,
     )
-
-    elapsed = end_time - start_time
-
-    # Estatísticas de memória
-    peak_allocated = (
-        torch.cuda.max_memory_allocated(0) / 1024**3
-    )
-
-    peak_reserved = (
-        torch.cuda.max_memory_reserved(0) / 1024**3
-    )
-
-    print("\n" + "=" * 60)
-    print("RESULTADO DA INFERÊNCIA")
-    print("=" * 60)
-
-    print("\nPergunta:")
-    print(question)
-
-    print("\nResposta:")
-    print(response)
-
-    print("\nMétricas:")
-
-    print("Tokens de entrada:", input_tokens)
-    print("Tokens gerados:", generated_tokens)
-    print("Tempo:", round(elapsed, 2), "segundos")
-
-    print(
-        "Velocidade:",
-        round(generated_tokens / elapsed, 2),
-        "tokens/segundo"
-    )
-
-    print("\nConsumo máximo de VRAM:")
-    print("Alocada:", round(peak_allocated, 2), "GB")
-    print("Reservada:", round(peak_reserved, 2), "GB")
-
-    return response
+    print(answer)
+    return answer
 
 
 if __name__ == "__main__":
-
-    model, tokenizer = load_medical_model()
-
-    question = (
-        "What is the importance of evaluating blood glucose "
-        "and glycated hemoglobin (HbA1c) together? "
-        "Explain the differences between these tests."
-    )
-
-    generate_response(
-        model,
-        tokenizer,
-        question
-    )
+    logging.basicConfig(level=logging.INFO, format="%(message)s")
+    generate_response(*load_medical_model(), "What is the difference between blood glucose and HbA1c?")

@@ -10,6 +10,17 @@ from src.models.schemas import PatientResolution
 from src.utils.logger import setup_logger
 
 logger = setup_logger("rag.patient_resolver")
+_CHART_CODE = re.compile(r"\b(?:pct|prt)[ -]?\d+\b")
+_MARKED_IDENTITY = re.compile(r"\b(?:paciente|prontuario|patient(?!\s+(?:record|registration)\b))\s+([\w -]+)")
+_DOCUMENT_OWNER = re.compile(
+    r"\b(?:anamnese|cadastro|ultrassom abdominal|ultrassonografia abdominal)\s+d[eao]\s+"
+    r"([a-z][\w'-]*(?:\s+[a-z][\w'-]*)+)"
+)
+_IDENTITY_END = re.compile(r"\s+(?:em|no|na|com|tem|teve|apresentou|possui|realizou|codigo)\b")
+_ACTIVE_REFERENCE = frozenset({
+    "ativo", "atual", "selecionado", "selecionada", "active", "selected", "mesma paciente", "mesmo paciente",
+    "paciente atual", "paciente ativa", "paciente ativo", "paciente selecionada", "paciente selecionado",
+})
 
 
 def normalize_patient_name(value: str) -> str:
@@ -107,17 +118,19 @@ class PatientResolver:
     def from_question(self, question: str) -> PatientResolution:
         """Resolve explicit chart codes and complete names embedded in a question."""
         query = normalize_patient_name(question)
-        codes = set(re.findall(r"\b(?:pct|prt)[ -]?\d+\b", query))
+        codes = set(_CHART_CODE.findall(query))
         names = {
             patient["full_name"] for patient in self.patients
             if re.search(r"\b" + re.escape(normalize_patient_name(patient["full_name"])) + r"\b", query)
         }
         if len(codes) > 1 or len(names) > 1:
             return PatientResolution(status="ambiguous", message="Informe um paciente por consulta.")
-        if codes or names:
-            return self.resolve(next(iter(codes), None), next(iter(names), None))
-        mention = re.search(r"\b(?:paciente|prontuario)\s+([\w -]+)", query)
+        patient_id = next(iter(codes), None)
+        if names:
+            return self.resolve(patient_id, next(iter(names)))
+        mention = _MARKED_IDENTITY.search(query) or _DOCUMENT_OWNER.search(query)
         if mention:
-            name = re.split(r"\s+(?:em|no|na|com|tem|teve|apresentou|possui|realizou)\b", mention[1])[0]
-            return self.resolve(patient_name=name.strip())
-        return PatientResolution(status="not_requested")
+            name = _IDENTITY_END.split(_CHART_CODE.split(mention[1], maxsplit=1)[0], maxsplit=1)[0].strip()
+            if name and name not in _ACTIVE_REFERENCE:
+                return self.resolve(patient_id, name)
+        return self.resolve(patient_id)

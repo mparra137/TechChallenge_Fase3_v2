@@ -74,10 +74,24 @@ class RetrieverService:
             raise ValueError("Identificação da pergunta diverge do filtro. Confirme o prontuário.")
         if patient.status in {"not_found", "ambiguous"}:
             return RetrievalResult(documents=[], patient=patient)
+        return self._retrieve(question, patient, document_type, limit)
+
+    def retrieve_for_patient(self, question: str, patient: PatientResolution) -> RetrievalResult:
+        """Retrieve for an already resolved patient, with no global fallback."""
+        if patient.status != "found" or not patient.patient_id or not question.strip():
+            raise ValueError("A consulta exige um paciente resolvido e uma pergunta.")
+        return self._retrieve(question, patient, None, self.default_k, scoped=True)
+
+    def _retrieve(
+        self, question: str, patient: PatientResolution, document_type: str | None, limit: int,
+        *, scoped: bool = False,
+    ) -> RetrievalResult:
         if self.loader:
-            exact = exact_query(question, patient, document_type, self.loader)
+            exact = exact_query(question, patient, document_type, self.loader, scoped=scoped)
             if exact is not None:
                 answer, documents = exact
+                if patient.patient_id and any(d.source.patient_id != patient.patient_id for d in documents):
+                    raise ValueError("Documentos fora do escopo do prontuário.")
                 return RetrievalResult(documents, patient, answer)
 
         metadata_filters: list[dict[str, str]] = []
@@ -100,6 +114,6 @@ class RetrieverService:
             "Recuperação concluída: documentos=%s tempo=%.3fs filtro_paciente=%s",
             len(documents),
             time.perf_counter() - started_at,
-            patient.patient_id or "nenhum",
+            bool(patient.patient_id),
         )
         return RetrievalResult(documents=documents, patient=patient)

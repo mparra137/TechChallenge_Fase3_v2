@@ -1,5 +1,8 @@
+# Este script realiza a criação de um repositório no Hugging Face e faz o upload de um modelo 
+# Llama 3.1 Medical Fine-Tuned Merged 16-bit.
+
 # Instalação / atualização das dependências
-# %pip install -U huggingface_hub hf_xet
+# pip install -U huggingface_hub hf_xet
 
 from pathlib import Path
 from huggingface_hub import login, HfApi

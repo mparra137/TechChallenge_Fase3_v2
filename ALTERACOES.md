@@ -1,5 +1,13 @@
 # Alterações no pipeline de dados – Fase 3
 
+## Agente conversacional local
+
+- Integração do Llama ajustado com LangGraph, memória temporária por conversa e recuperação hospitalar na CPU.
+- Consultas laboratoriais exatas com fontes e seleção de trechos verificáveis para respostas narrativas.
+- CLI interativa, verificação de escopo por paciente e filtros determinísticos de saída.
+
+Consulte o [guia de execução](README_RAG.md#agente-local) e o [plano técnico](docs/agent_impl.md).
+
 ## O que mudou
 
 O pipeline agora junta **três fontes**, e não só o MedQuAD, e cobre os itens do enunciado sobre preparação dos dados (preprocessing, anonimização e curadoria).

@@ -29,13 +29,10 @@ if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
 from src import config
-from src.embeddings.embedding_service import get_embedding_service
-from src.ingestion.document_loader import HospitalDocumentLoader
+from src.rag.components import build_rag_components as _build_rag_components
 from src.rag.context_builder import ContextBuilder
 from src.rag.rag_service import RAGService
 from src.retrieval.patient_resolver import PatientResolver, normalize_patient_name as normalize_name
-from src.retrieval.retriever_service import RetrieverService
-from src.vectorstore.chroma_service import ChromaService
 
 SEED = config.RAG_DEFAULT_SEED
 N_PATIENTS = config.RAG_DEFAULT_N_PATIENTS
@@ -580,27 +577,6 @@ def search_rag(
         print(f"Fonte: {doc.metadata.get('source')}")
         print(f"Trecho: {doc.page_content}")
     return results
-
-def _build_rag_components(persist_dir: Path | None = None, patients_path: Path | None = None,
-                          documents_path: Path | None = None) -> tuple[HospitalDocumentLoader, ChromaService, RetrieverService]:
-    """Build independent RAG components from centralized settings."""
-    settings = config.validate_rag_settings(require_llm=False)
-    loader = HospitalDocumentLoader(patients_path or settings.patients_file, documents_path or settings.documents_file)
-    patients = loader.load_patients()
-    embedding_service = get_embedding_service(settings.embedding_model, settings.embedding_device)
-    chroma_service = ChromaService(
-        embedding_service=embedding_service,
-        persist_directory=persist_dir or settings.chroma_persist_directory,
-        collection_name=settings.chroma_collection_name,
-    )
-    retriever = RetrieverService(
-        vectorstore=chroma_service,
-        patient_resolver=PatientResolver(patients),
-        default_k=settings.retriever_k,
-        loader=loader,
-    )
-    return loader, chroma_service, retriever
-
 
 def ingest_hospital_data(persist_dir: Path | None = None, documents_path: Path | None = None) -> dict[str, Any]:
     """Validate original JSONL files and idempotently index one vector per document."""

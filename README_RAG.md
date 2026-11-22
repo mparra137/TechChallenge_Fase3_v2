@@ -19,11 +19,36 @@ Pergunta → PatientResolver → RetrieverService → ContextBuilder → LLM →
 - `src/llm/llm_factory.py`: factory desacoplada do provedor; OpenAI é o provedor atual.
 - `src/rag/rag_service.py`: coordena recuperação, contexto, geração e fontes estruturadas.
 
-Os componentes são independentes para futura composição em nós LangGraph. A inferência local existente do Llama não é modificada nem usada nesta primeira integração.
+Os mesmos componentes de recuperação também atendem ao agente conversacional. O comando `query` e a síntese documental da CLI usam a geração OpenAI configurada. Na CLI do agente, o Llama local atende às perguntas médicas gerais e auxilia no roteamento.
+
+## Agente local
+
+Use Python 3.12 com PyTorch CUDA. No Windows, o perfil de referência é Torch 2.10.0 com CUDA 12.8. Em um ambiente novo, instale primeiro a distribuição CUDA e depois as dependências do projeto.
+
+```powershell
+& .\.venv\Scripts\python.exe -m pip install torch==2.10.0 --index-url https://download.pytorch.org/whl/cu128
+& .\.venv\Scripts\python.exe -m pip install -r requirements.txt
+& .\.venv\Scripts\python.exe -m scripts.medical_agent
+```
+
+O agente espera o adaptador configurado, o respectivo modelo-base e o MiniLM no cache do Hugging Face. A inferência geral usa CUDA e a recuperação usa CPU. Para perguntas de síntese ou interpretação documental, configure `OPENAI_API_KEY` no ambiente ou em `.env` e o modelo em `src/config.py`. A API recebe a pergunta mascarada e os documentos sintéticos selecionados, com aliases temporários. A aplicação valida os aliases e resolve as fontes no ambiente local. A rota geral permanece disponível quando a OpenAI ou o índice está indisponível. As consultas exatas continuam disponíveis quando falta apenas o acesso à OpenAI.
+
+- `/ajuda` lista os comandos.
+- `/limpar` apaga o contexto e os checkpoints da conversa atual.
+- `/nova` encerra a sessão anterior e cria uma conversa isolada.
+- `/sair`, EOF ou `Ctrl+C` encerram a CLI.
+
+Exemplo de conversa sintética: “Qual foi a última creatinina do paciente PCT-000001?” e “E a glicemia dele?”. A CLI confirma o nome selecionado, exibe fatos documentados e referencia as fontes por ID, data e origem. A memória vive em RAM. O modo `--log-level INFO` registra tempos e métricas técnicas de inferência. Consulte o [plano técnico do agente](docs/agent_impl.md) para detalhes de segurança e avaliação.
+
+Pedidos diretos pela última anamnese exibem o documento mais recente. Pedidos como “Quais os exames realizados pelo paciente PCT-000086?” listam os exames laboratoriais e de imagem registrados para o paciente. “Quais os últimos 3 exames?” ordena os registros por data e aplica o limite solicitado. A resposta e as fontes podem mostrar o código do prontuário consultado. O mascaramento continua aplicado aos demais identificadores protegidos.
+
+Após identificar um paciente, a CLI usa o mesmo prontuário nas consultas documentais seguintes que omitirem nome e código. Perguntas médicas gerais continuam no Llama local e preservam o paciente ativo. Uma nova identidade confirmada muda o prontuário. Identidades ambíguas ou não encontradas suspendem a seleção até o esclarecimento. Pedidos de resultado de ultrassom abdominal usam o laudo mais recente, ou o laudo da data informada.
+
+Nas respostas médicas gerais, a CLI exibe as referências e os links gerados pelo Llama. A verificação de proveniência dos documentos recuperados se aplica às fontes do RAG.
 
 ## Configuração
 
-Use `.env.example` como referência para colocar a chave OpenAI em `.env` (`OPEN_AI_API_KEY` ou `OPENAI_API_KEY`). A chave Hugging Face é opcional para o modelo público. Configure modelo e endpoint OpenAI, provedor, embeddings, coleção, caminhos, K, orçamento de contexto e log diretamente em `src/config.py`. Confira se o modelo configurado está habilitado na conta.
+Use `.env.example` como referência para colocar a chave OpenAI em `.env` (`OPEN_AI_API_KEY` ou `OPENAI_API_KEY`). A chave Hugging Face é opcional para o modelo público. Configure modelo e endpoint OpenAI, provedor, embeddings, coleção, caminhos, K, orçamento de contexto e log diretamente em `src/config.py`. Para a síntese na CLI, use um modelo habilitado na conta e compatível com [Structured Outputs](https://developers.openai.com/api/docs/guides/structured-outputs).
 
 ## Instalação
 

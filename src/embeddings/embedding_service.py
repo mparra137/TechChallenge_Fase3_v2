@@ -14,9 +14,10 @@ logger = setup_logger("rag.embeddings")
 class EmbeddingService:
     """Own a single HuggingFaceEmbeddings instance for the current process."""
 
-    def __init__(self, model_name: str, device: str = "cpu") -> None:
+    def __init__(self, model_name: str, device: str = "cpu", *, local_files_only: bool = False) -> None:
         self.model_name = model_name
         self.device = device
+        self.local_files_only = local_files_only
         self._embeddings: Any | None = None
 
     def get_embeddings(self) -> Any:
@@ -26,9 +27,12 @@ class EmbeddingService:
         try:
             from langchain_huggingface import HuggingFaceEmbeddings
 
+            model_kwargs: dict[str, str | bool] = {"device": self.device}
+            if self.local_files_only:
+                model_kwargs["local_files_only"] = True
             self._embeddings = HuggingFaceEmbeddings(
                 model_name=self.model_name,
-                model_kwargs={"device": self.device},
+                model_kwargs=model_kwargs,
                 encode_kwargs={"normalize_embeddings": True},
             )
         except (ImportError, OSError, RuntimeError, ValueError) as exc:
@@ -43,6 +47,8 @@ class EmbeddingService:
 def get_embedding_service(
     model_name: str = config.EMBEDDING_MODEL,
     device: str = config.EMBEDDING_DEVICE,
+    *,
+    local_files_only: bool = False,
 ) -> EmbeddingService:
     """Return a cached service so repeated queries do not reload the embedding model."""
-    return EmbeddingService(model_name=model_name, device=device)
+    return EmbeddingService(model_name=model_name, device=device, local_files_only=local_files_only)

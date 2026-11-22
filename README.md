@@ -1,6 +1,6 @@
 # Tech Challenge - Fase 3: Pipeline de Fine-Tuning Biomédico (MedQuAD via Hugging Face)
 
-Para executar a consulta hospitalar do TCv2, consulte o [guia do RAG](README_RAG.md). As seções abaixo documentam o pipeline inicial de preparação do MedQuAD.
+O TCv2 inclui um agente conversacional com LangGraph, Llama 3.1 8B ajustado localmente para perguntas médicas gerais e síntese de prontuários sintéticos com OpenAI. Consulte o [guia de execução](README_RAG.md#agente-local) e o [plano técnico](docs/agent_impl.md). As seções abaixo documentam o pipeline inicial de preparação do MedQuAD.
 
 Este projeto foi desenvolvido como parte do **Tech Challenge (Fase 3)** da pós-graduação em **IA para Devs (FIAP)**.
 
@@ -150,6 +150,7 @@ HUGGINGFACE_API_KEY=seu_token_aqui
 3. Instale as dependências:
    ```bash
    pip install -r requirements.txt
+   pip install torch==2.10.0 --index-url https://download.pytorch.org/whl/cu128
    ```
 
 ---

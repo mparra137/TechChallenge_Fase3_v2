@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from src.models.schemas import RetrievedDocument
 from src.config import RAG_MAX_CONTEXT_TOKENS
@@ -14,6 +14,7 @@ class ContextBuildResult:
 
     context: str
     documents: list[RetrievedDocument]
+    fragments: dict[str, str] = field(default_factory=dict)
 
 
 class ContextBuilder:
@@ -37,12 +38,13 @@ class ContextBuilder:
             f"| fonte: {source.source or 'não informada'}]"
         )
 
-    def build(self, documents: list[RetrievedDocument]) -> ContextBuildResult:
+    def build(self, documents: list[RetrievedDocument], *, whole_documents: bool = False) -> ContextBuildResult:
         """Deduplicate by document ID and append only content that fits the context limit."""
         remaining = self.max_characters
         remaining_bytes = self.max_tokens  # UTF-8 bytes bound the number of OpenAI BPE tokens.
         parts: list[str] = []
         included: list[RetrievedDocument] = []
+        fragments: dict[str, str] = {}
         seen_ids: set[str] = set()
         for document in documents:
             document_id = document.source.document_id
@@ -58,6 +60,8 @@ class ContextBuilder:
             byte_budget = remaining_bytes - len((separator + header + "\n").encode("utf-8"))
             if byte_budget <= 0:
                 break
+            if whole_documents and (len(content) > available_for_content or len(content.encode("utf-8")) > byte_budget):
+                continue
             content = content.encode("utf-8")[:byte_budget].decode("utf-8", errors="ignore")
             if len(content) > available_for_content:
                 content = content[:available_for_content].rstrip()
@@ -66,8 +70,9 @@ class ContextBuilder:
             part = f"{header}\n{content}"
             parts.append(part)
             included.append(document)
+            fragments[document_id] = content
             remaining -= len(separator) + len(part)
             remaining_bytes -= len((separator + part).encode("utf-8"))
             if remaining <= 0:
                 break
-        return ContextBuildResult(context="\n\n".join(parts), documents=included)
+        return ContextBuildResult(context="\n\n".join(parts), documents=included, fragments=fragments)
