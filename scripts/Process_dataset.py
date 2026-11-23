@@ -16,6 +16,7 @@ Uso:
 """
 
 import json
+import logging
 import sys
 from pathlib import Path
 from typing import Any, Dict, List
@@ -33,9 +34,9 @@ from src.curation import DatasetCurator  # noqa: E402
 from src.data_loader import MedQuadDataLoader, PubMedQADataLoader  # noqa: E402
 from src.jsonl_converter import JsonlConverter  # noqa: E402
 from src.synthetic_generator import SyntheticHospitalDataGenerator  # noqa: E402
-from src.utils.logger import setup_logger  # noqa: E402
+from src.utils.logger import configure_logging  # noqa: E402
 
-logger = setup_logger("pipeline_runner")
+logger = logging.getLogger("pipeline_runner")
 
 UNIFIED_COLUMNS: List[str] = ["question", "answer", "source", "source_ref", "category"]
 
@@ -236,6 +237,7 @@ def run_only_eval() -> None:
 
 
 if __name__ == "__main__":
+    configure_logging()
     if "--only-eval" in sys.argv:
         run_only_eval()
     else:

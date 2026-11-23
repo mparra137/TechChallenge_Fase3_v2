@@ -6,14 +6,13 @@ from collections import Counter
 from dataclasses import dataclass, field
 from datetime import date
 import json
+import logging
 from pathlib import Path
 from typing import Any, Iterable
 
 from langchain_core.documents import Document
 
-from src.utils.logger import setup_logger
-
-logger = setup_logger("rag.document_loader")
+logger = logging.getLogger("rag.document_loader")
 
 REQUIRED_PATIENT_FIELDS = ("patient_id", "full_name")
 REQUIRED_DOCUMENT_FIELDS = (

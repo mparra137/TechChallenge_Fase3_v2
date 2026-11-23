@@ -111,7 +111,7 @@ A memória de conversa vive em RAM. O paciente continua ativo para as consultas 
 | A CLI abre e informa que os prontuários estão indisponíveis | Execute `ingest` e `stats` do passo 4. Confira o MiniLM em cache e a coleção `hospital_patients`. Perguntas gerais continuam disponíveis. |
 | Consultas exatas funcionam, mas a síntese documental está indisponível | Confira a chave OpenAI, o acesso da conta ao modelo e os avisos no terminal. Uma resposta fora do esquema ou com fontes inválidas também impede a exibição da síntese. |
 
-Execute `python -m pytest -q` para verificar o projeto. Para acompanhar tempos e rotas, use `python -m scripts.medical_agent --log-level INFO`.
+Execute `python -m pytest -q` para verificar o projeto. Os logs a partir de `INFO`, incluindo tempos e rotas, são gravados em `logs/execucao.log`. Para exibi-los também no console do agente, use `python -m scripts.medical_agent --log-level INFO`.
 
 ## Guias do projeto
 

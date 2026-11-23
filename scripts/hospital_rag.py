@@ -33,6 +33,7 @@ from src.rag.components import build_rag_components as _build_rag_components
 from src.rag.context_builder import ContextBuilder
 from src.rag.rag_service import RAGService
 from src.retrieval.patient_resolver import PatientResolver, normalize_patient_name as normalize_name
+from src.utils.logger import configure_logging
 
 SEED = config.RAG_DEFAULT_SEED
 N_PATIENTS = config.RAG_DEFAULT_N_PATIENTS
@@ -752,6 +753,7 @@ def main() -> None:
     sub.add_parser("menu", help="Abrir menu interativo em português")
 
     args = parser.parse_args()
+    configure_logging()
     if args.command is None or args.command == "menu":
         interactive_menu()
     elif args.command == "generate":

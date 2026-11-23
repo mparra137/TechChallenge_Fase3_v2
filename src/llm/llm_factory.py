@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
+import logging
 from typing import Any
 
 from src import config
-from src.utils.logger import setup_logger
 
-logger = setup_logger("rag.llm_factory")
+logger = logging.getLogger("rag.llm_factory")
 
 
 def get_llm(settings: config.RagSettings | None = None) -> Any:

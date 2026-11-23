@@ -9,9 +9,7 @@ from typing import Any, Dict, List, Tuple
 
 import pandas as pd
 
-from src.utils.logger import setup_logger
-
-logger: logging.Logger = setup_logger("jsonl_converter")
+logger: logging.Logger = logging.getLogger("jsonl_converter")
 
 
 @dataclass(frozen=True)

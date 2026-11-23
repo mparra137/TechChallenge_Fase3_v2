@@ -2,14 +2,14 @@
 
 from __future__ import annotations
 
+import logging
 import re
 import unicodedata
 from typing import Any, Iterable
 
 from src.models.schemas import PatientResolution
-from src.utils.logger import setup_logger
 
-logger = setup_logger("rag.patient_resolver")
+logger = logging.getLogger("rag.patient_resolver")
 _CHART_CODE = re.compile(r"\b(?:pct|prt)[ -]?\d+\b")
 _MARKED_IDENTITY = re.compile(r"\b(?:paciente|prontuario|patient(?!\s+(?:record|registration)\b))\s+([\w -]+)")
 _DOCUMENT_OWNER = re.compile(

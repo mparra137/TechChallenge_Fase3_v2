@@ -15,6 +15,7 @@ if __name__ == "__main__":
 
 from inference.model_loader import load_medical_model
 from src import config
+from src.utils.logger import configure_logging
 
 logger = logging.getLogger(__name__)
 _GENERATION_LOCK = Lock()
@@ -119,5 +120,5 @@ def generate_response(model: Any, tokenizer: Any, question: str) -> str:
 
 
 if __name__ == "__main__":
-    logging.basicConfig(level=logging.INFO, format="%(message)s")
+    configure_logging()
     generate_response(*load_medical_model(), "What is the difference between blood glucose and HbA1c?")

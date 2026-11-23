@@ -16,6 +16,7 @@ from src.agent.state import AgentAnswer
 from src.llm.llm_factory import get_llm
 from src.llm.local_chat import LocalChat
 from src.rag.components import build_rag_components
+from src.utils.logger import configure_logging
 
 logger = logging.getLogger(__name__)
 _HELP = "/ajuda  comandos | /limpar  apagar contexto | /nova  nova conversa | /sair  encerrar"
@@ -64,12 +65,17 @@ def interactive(agent: MedicalAgent) -> None:
 
 def main() -> int:
     """Start local inference, connect to the persisted RAG and enter the CLI."""
+
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--log-level", choices=("WARNING", "INFO"), default="INFO")
+
+    parser.add_argument(
+        "--log-level", choices=("WARNING", "INFO"), default="WARNING",
+        help="Nível mínimo dos logs exibidos no console (padrão: %(default)s).",
+    )
+
     args = parser.parse_args()
-    logging.basicConfig(level=args.log_level, format="%(levelname)s %(name)s %(message)s")
-    for service in ("document_loader", "embeddings", "patient_resolver", "chroma", "retriever"):
-        logging.getLogger(f"rag.{service}").setLevel(args.log_level)
+
+    configure_logging(console_level=args.log_level)
 
     from inference.inference import LocalInference, load_medical_model
 

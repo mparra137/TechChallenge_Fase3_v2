@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import logging
 import time
 from typing import Optional
 
@@ -10,10 +11,9 @@ from src.models.schemas import DocumentSource, PatientResolution, RetrievedDocum
 from src.retrieval.patient_resolver import PatientResolver
 from src.retrieval.structured import exact_query
 from src.ingestion.document_loader import HospitalDocumentLoader
-from src.utils.logger import setup_logger
 from src.vectorstore.chroma_service import ChromaService
 
-logger = setup_logger("rag.retriever")
+logger = logging.getLogger("rag.retriever")
 
 
 @dataclass(frozen=True)

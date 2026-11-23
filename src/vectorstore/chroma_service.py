@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 from pathlib import Path
 from typing import Any, Iterable
 
@@ -10,9 +11,8 @@ from langchain_core.documents import Document
 
 from src.embeddings.embedding_service import EmbeddingService
 from src.models.schemas import IngestionStats
-from src.utils.logger import setup_logger
 
-logger = setup_logger("rag.chroma")
+logger = logging.getLogger("rag.chroma")
 
 
 def _metadata_signature(metadata: dict[str, Any]) -> str:

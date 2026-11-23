@@ -3,12 +3,12 @@
 from __future__ import annotations
 
 from functools import lru_cache
+import logging
 from typing import Any
 
 from src import config
-from src.utils.logger import setup_logger
 
-logger = setup_logger("rag.embeddings")
+logger = logging.getLogger("rag.embeddings")
 
 
 class EmbeddingService:

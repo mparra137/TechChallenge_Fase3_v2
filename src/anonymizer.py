@@ -16,9 +16,7 @@ from typing import Dict, Iterable, List, Optional, Pattern, Tuple
 
 import pandas as pd
 
-from src.utils.logger import setup_logger
-
-logger: logging.Logger = setup_logger("anonymizer")
+logger: logging.Logger = logging.getLogger("anonymizer")
 
 # Ordem importa: padrões mais específicos primeiro (CNS antes de telefone, CPF antes de RG).
 DEFAULT_PATTERNS: List[Tuple[str, Pattern[str]]] = [

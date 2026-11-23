@@ -15,9 +15,8 @@ from datasets import load_dataset
 import pandas as pd
 
 from src.config import DISCARDED_JSON_PATH, DISCARDED_PUBMEDQA_JSON_PATH
-from src.utils.logger import setup_logger
 
-logger: logging.Logger = setup_logger("data_loader")
+logger: logging.Logger = logging.getLogger("data_loader")
 
 
 class BaseQADataLoader:

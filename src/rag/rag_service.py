@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import time
 import re
 from openai import OpenAIError
@@ -13,9 +14,8 @@ from src.models.schemas import DocumentSource, RAGResponse
 from src.rag.context_builder import ContextBuilder
 from src.rag.answer_generator import generate_answer
 from src.retrieval.retriever_service import RetrieverService
-from src.utils.logger import setup_logger
 
-logger = setup_logger("rag.service")
+logger = logging.getLogger("rag.service")
 
 NO_EVIDENCE_MESSAGE = (
     "Não localizei informações hospitalares suficientes para responder com segurança à pergunta."

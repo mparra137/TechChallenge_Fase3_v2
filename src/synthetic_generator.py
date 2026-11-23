@@ -15,9 +15,7 @@ import logging
 import random
 from typing import Callable, Dict, List, Tuple
 
-from src.utils.logger import setup_logger
-
-logger: logging.Logger = setup_logger("synthetic_generator")
+logger: logging.Logger = logging.getLogger("synthetic_generator")
 
 SOURCE_NAME = "synthetic_hospital"
 VALIDATION_NOTE = (

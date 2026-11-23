@@ -8,9 +8,8 @@ from typing import Optional
 import pandas as pd
 
 from src.data_loader import BaseQADataLoader
-from src.utils.logger import setup_logger
 
-logger: logging.Logger = setup_logger("curation")
+logger: logging.Logger = logging.getLogger("curation")
 
 _MULTI_SPACES = re.compile(r"[ \t]+")
 _MULTI_NEWLINES = re.compile(r"\n{3,}")
